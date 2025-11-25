@@ -222,4 +222,4 @@ Write-Host "`n🐛 Troubleshooting:"
 Write-Host "   If you encounter issues, check logs\ directory for error logs" -ForegroundColor White
 
 Print-Success "Edge Health Guardian is ready to use on Windows!"
-Read-Host "`nPress Enter to exit"
+Read-Host "nPress Enter to exit"
