@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-"""
-train_face_model_v2.py
-
-Improved StressDetectionModel training + QAT + TFLite export helper.
-Drop into your repo (e.g. models/training/) and run.
-"""
 
 import argparse
 from pathlib import Path
@@ -15,9 +8,8 @@ import tensorflow as tf
 from tensorflow.keras import layers, models
 import tensorflow_model_optimization as tfmot
 
-# -------------------------
 # Model
-# -------------------------
+
 class StressDetectionModel:
     def __init__(self, input_shape: tuple):
         self.input_shape = input_shape
