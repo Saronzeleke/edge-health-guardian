@@ -192,9 +192,8 @@ class StressDetectionModel:
             f.write(tflite_model)
         print(f"✅ TFLite model written to: {filepath}")
 
-# -------------------------
 # Representative generator helper
-# -------------------------
+
 def make_representative_gen_from_numpy(x_samples: np.ndarray, num_steps: int = 100):
     """
     Creates a callable that yields representative samples for TFLite converter.
