@@ -164,8 +164,25 @@ pause
 "@ | Out-File -FilePath "start_health_guardian.bat" -Encoding ASCII
 
 # Create PowerShell startup script
+# Print-Status "Creating PowerShell startup script..."
+# @"
+# Write-Host "🚀 Starting Edge Health Guardian..." -ForegroundColor Cyan
+# Write-Host "📍 Privacy-First | 🔒 On-Device AI | 🏥 Health Monitoring" -ForegroundColor Cyan
+
+# # Activate virtual environment
+# & ".\health-guardian-env\Scripts\Activate.ps1"
+
+# # Set environment variables
+# `$env:PYTHONPATH = "`$env:PYTHONPATH;`$PWD\src"
+
+# # Start the main application
+# python main.py `$args
+
+# Read-Host "`nPress Enter to exit"
+# "@ | Out-File -FilePath "start_health_guardian.ps1" -Encoding UTF8
+# Create PowerShell startup script
 Print-Status "Creating PowerShell startup script..."
-@"
+$psScript = @"
 Write-Host "🚀 Starting Edge Health Guardian..." -ForegroundColor Cyan
 Write-Host "📍 Privacy-First | 🔒 On-Device AI | 🏥 Health Monitoring" -ForegroundColor Cyan
 
@@ -179,7 +196,8 @@ Write-Host "📍 Privacy-First | 🔒 On-Device AI | 🏥 Health Monitoring" -Fo
 python main.py `$args
 
 Read-Host "`nPress Enter to exit"
-"@ | Out-File -FilePath "start_health_guardian.ps1" -Encoding UTF8
+"@
+$psScript | Out-File -FilePath "start_health_guardian.ps1" -Encoding UTF8
 
 # Run basic tests
 Print-Status "Running basic system tests..."
