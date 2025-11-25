@@ -1,4 +1,3 @@
-# models/training/train_face_model.py
 import tensorflow as tf
 import numpy as np
 from tensorflow.keras import layers, models
