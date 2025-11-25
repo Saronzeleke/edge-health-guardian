@@ -82,49 +82,49 @@ class StressDetectionModel:
         # Recompile after quantization
         self.compile_model()
 
-# models/conversion/convert_to_tflite.py
-import tensorflow as tf
-import numpy as np
+# # models/conversion/convert_to_tflite.py
+# import tensorflow as tf
+# import numpy as np
 
-class TFLiteConverter:
-    def __init__(self):
-        self.converter = None
+# class TFLiteConverter:
+#     def __init__(self):
+#         self.converter = None
         
-    def convert_to_int8(self, model_path: str, representative_dataset):
-        """Convert model to INT8 TFLite with optimization"""
-        self.converter = tf.lite.TFLiteConverter.from_keras_model(model_path)
+#     def convert_to_int8(self, model_path: str, representative_dataset):
+#         """Convert model to INT8 TFLite with optimization"""
+#         self.converter = tf.lite.TFLiteConverter.from_keras_model(model_path)
         
-        # Arm optimization settings
-        self.converter.optimizations = [tf.lite.Optimize.DEFAULT]
-        self.converter.representative_dataset = representative_dataset
-        self.converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-        self.converter.inference_input_type = tf.int8
-        self.converter.inference_output_type = tf.int8
+#         # Arm optimization settings
+#         self.converter.optimizations = [tf.lite.Optimize.DEFAULT]
+#         self.converter.representative_dataset = representative_dataset
+#         self.converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+#         self.converter.inference_input_type = tf.int8
+#         self.converter.inference_output_type = tf.int8
         
-        # Enable XNNPACK delegation
-        self.converter.experimental_new_converter = True
-        self.converter._experimental_default_to_single_batch_in_tensor_list_ops = True
+#         # Enable XNNPACK delegation
+#         self.converter.experimental_new_converter = True
+#         self.converter._experimental_default_to_single_batch_in_tensor_list_ops = True
         
-        tflite_model = self.converter.convert()
+#         tflite_model = self.converter.convert()
         
-        return tflite_model
+#         return tflite_model
     
-    def convert_to_fp16(self, model_path: str):
-        """Convert model to FP16 for GPU acceleration"""
-        self.converter = tf.lite.TFLiteConverter.from_keras_model(model_path)
+#     def convert_to_fp16(self, model_path: str):
+#         """Convert model to FP16 for GPU acceleration"""
+#         self.converter = tf.lite.TFLiteConverter.from_keras_model(model_path)
         
-        self.converter.optimizations = [tf.lite.Optimize.DEFAULT]
-        self.converter.target_spec.supported_types = [tf.float16]
+#         self.converter.optimizations = [tf.lite.Optimize.DEFAULT]
+#         self.converter.target_spec.supported_types = [tf.float16]
         
-        tflite_model = self.converter.convert()
+#         tflite_model = self.converter.convert()
         
-        return tflite_model
+#         return tflite_model
 
-def create_representative_dataset():
-    """Create representative dataset for quantization calibration"""
-    def _representative_dataset():
-        for _ in range(100):
-            # Generate random data in the expected input range
-            data = np.random.rand(1, 96, 96, 3).astype(np.float32) * 255.0
-            yield [data]
-    return _representative_dataset
+# def create_representative_dataset():
+#     """Create representative dataset for quantization calibration"""
+#     def _representative_dataset():
+#         for _ in range(100):
+#             # Generate random data in the expected input range
+#             data = np.random.rand(1, 96, 96, 3).astype(np.float32) * 255.0
+#             yield [data]
+#     return _representative_dataset
