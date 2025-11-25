@@ -41,14 +41,14 @@ class StressDetectionModel:
         x = layers.GlobalAveragePooling2D()(x)
 
         # Temporal attention for sequence processing (1-step sequence)
-        x = layers.Reshape((1, -1))(x)                         # shape: (batch, 1, features)
-        x = layers.LSTM(64, return_sequences=True)(x)         # shape: (batch, 1, 64)
+        x = layers.Reshape((1, -1))(x)                         
+        x = layers.LSTM(64, return_sequences=True)(x)         
 
         # Attention mechanism over the time axis (here time dim = 1)
-        attention = layers.Dense(1, activation='tanh')(x)     # (batch, 1, 1)
-        attention = layers.Flatten()(attention)               # (batch, 1)
-        attention = layers.Activation('softmax')(attention)   # (batch, 1)
-        attention = layers.RepeatVector(64)(attention)        # (batch, 64, 1)
+        attention = layers.Dense(1, activation='tanh')(x)     
+        attention = layers.Flatten()(attention)              
+        attention = layers.Activation('softmax')(attention)   
+        attention = layers.RepeatVector(64)(attention)        
         attention = layers.Permute([2, 1])(attention)        
 
         attended_features = layers.multiply([x, attention])   
