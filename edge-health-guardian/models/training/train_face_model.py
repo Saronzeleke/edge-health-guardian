@@ -112,9 +112,8 @@ class StressDetectionModel:
         # Recompile (metrics/losses same as before)
         self.compile_model()
 
-    # -------------------------
     # Training helper
-    # -------------------------
+    
     def train(self,
               train_input,
               train_labels,
