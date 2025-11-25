@@ -49,10 +49,10 @@ class StressDetectionModel:
         attention = layers.Flatten()(attention)               # (batch, 1)
         attention = layers.Activation('softmax')(attention)   # (batch, 1)
         attention = layers.RepeatVector(64)(attention)        # (batch, 64, 1)
-        attention = layers.Permute([2, 1])(attention)         # (batch, 1, 64)
+        attention = layers.Permute([2, 1])(attention)        
 
-        attended_features = layers.multiply([x, attention])   # (batch, 1, 64)
-        attended_features = layers.Lambda(lambda z: tf.reduce_sum(z, axis=1))(attended_features)  # (batch, 64)
+        attended_features = layers.multiply([x, attention])   
+        attended_features = layers.Lambda(lambda z: tf.reduce_sum(z, axis=1))(attended_features)  
 
         # Output layers
         x = layers.Dense(128, activation='relu')(attended_features)
