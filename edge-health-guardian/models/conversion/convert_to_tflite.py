@@ -1,4 +1,3 @@
-# models/conversion/convert_to_tflite.py
 import tensorflow as tf
 import numpy as np
 import os
