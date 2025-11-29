@@ -118,7 +118,7 @@ class AlertSystem:
                 # Sine wave for the given frequency
                 sample = max_amplitude * 0.5 * np.sin(2 * np.pi * frequency * t)
                 buf[i][0] = int(sample)  
-                buf[i][1] = int(sample)  # right channel
+                buf[i][1] = int(sample)  
             
             # Create pygame sound and play
             sound = pygame.sndarray.make_sound(buf)
@@ -130,16 +130,16 @@ class AlertSystem:
         except Exception as e:
             logging.error(f"Beep generation failed: {e}")
             # Fallback to system beep
-            print("\a")  # System bell
+            print("\a")  
     
     def _show_visual_alert(self, alert: Dict, level: str):
         """Show visual alert in console with colors"""
         try:
             colors = {
-                'critical': '\033[91m',  # Red
-                'warning': '\033[93m',   # Yellow  
-                'info': '\033[94m',      # Blue
-                'high': '\033[93m'       # Yellow for high level
+                'critical': '\033[91m',  
+                'warning': '\033[93m',    
+                'info': '\033[94m',     
+                'high': '\033[93m'       
             }
             
             reset_color = '\033[0m'
@@ -165,12 +165,12 @@ class AlertSystem:
     def _repeat_alert(self, alert: Dict):
         """Repeat critical alert until acknowledged"""
         repeat_count = 0
-        max_repeats = 3  # Only repeat 3 times to avoid spam
+        max_repeats = 3  
         
         while (not alert['acknowledged'] and 
                alert in self.active_alerts and 
                repeat_count < max_repeats):
-            time.sleep(10)  # Repeat every 10 seconds
+            time.sleep(10)  
             if not alert['acknowledged']:
                 if self.visual_enabled:
                     self._show_visual_alert(alert, 'critical')
