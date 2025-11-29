@@ -34,25 +34,24 @@ class AdaptiveSensorFusion:
                     # Combine success and face detection for confidence
                     return float(max(0.1, min(1.0, success * face_detected)))
                 else:
-                    return 0.5  # Medium confidence for unexpected data types
+                    return 0.5  
                     
             elif sensor_type == 'movement':
                 # For movement data, check if it's a valid dictionary with data
                 if isinstance(data, dict) and data:
-                    return 0.7  # Default good confidence for movement
+                    return 0.7  
                 else:
-                    return 0.3  # Low confidence for invalid movement data
-                    
+                    return 0.3 
             elif sensor_type == 'hr':
                 if data is not None and hasattr(data, '__len__'):
                     data_array = np.array(data)
                     if len(data_array) > 5:
                         return float(max(0.1, min(1.0, 1.0 / (1.0 + np.std(data_array)))))
-                return 0.1  # Low confidence for invalid HR data
+                return 0.1  
                 
         except Exception as e:
             logger.warning(f"Signal quality calculation failed for {sensor_type}: {e}")
-            return 0.1  # Minimum confidence on error
+            return 0.1  
 
     def update_confidence_scores(self, face_data, movement_data, hr_data: Optional[np.ndarray] = None):
         """Update confidence scores with robust error handling"""
