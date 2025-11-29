@@ -1,395 +1,278 @@
 # models/conversion/convert_to_tflite.py
 import tensorflow as tf
-import tensorflow_model_optimization as tfmot
 import numpy as np
 import os
 import json
 from pathlib import Path
 import logging
+import time
+from typing import Callable, Generator, Tuple, Optional
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("TFLiteConverter")
+
+
+def _safe_get_model_size(model_path: Path) -> int:
+    try:
+        return os.path.getsize(model_path)
+    except Exception:
+        return 0
+
 
 class TFLiteConverter:
-    """Comprehensive TFLite conversion with Arm optimization"""
-    
-    def __init__(self, model_dir="models/trained_models"):
+    def __init__(self, model_dir: str = "models/trained_models"):
         self.model_dir = Path(model_dir)
         self.output_dir = Path("models/optimized_models")
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Setup logging
-        logging.basicConfig(level=logging.INFO)
-        self.logger = logging.getLogger("TFLiteConverter")
-        
-    def convert_keras_to_tflite(self, model_name: str, optimization_level: str = "DEFAULT"):
+
+        logger.info(f"TFLiteConverter initialized: model_dir={self.model_dir} output_dir={self.output_dir}")
+
+    def convert_keras_to_tflite(
+        self,
+        model_name: str,
+        optimization_level: str = "DEFAULT",
+        representative_dataset_fn: Optional[Callable[[], Generator]] = None
+    ) -> Tuple[Path, dict]:
         """
-        Convert Keras model to TFLite with specified optimization
-        
+        Convert a Keras model to TFLite.
+
         Args:
-            model_name: Name of the model file (without extension)
-            optimization_level: One of ["DEFAULT", "INT8", "FP16", "FULL_INT8"]
+            model_name: base file name (without extension) in model_dir
+            optimization_level: "DEFAULT", "FP16", "INT8", "FULL_INT8"
+            representative_dataset_fn: optional callable returning a generator for representative data
+        Returns:
+            (output_path, model_info)
         """
         model_path = self.model_dir / f"{model_name}.h5"
-        
         if not model_path.exists():
             raise FileNotFoundError(f"Model not found: {model_path}")
-        
-        self.logger.info(f"🔄 Converting {model_name} with {optimization_level} optimization...")
-        
-        # Load Keras model
-        model = tf.keras.models.load_model(model_path)
-        
-        # Create converter
+
+        logger.info(f"Converting {model_name} with optimization {optimization_level}")
+
+        model = tf.keras.models.load_model(str(model_path))
         converter = tf.lite.TFLiteConverter.from_keras_model(model)
-        
-        # Apply optimizations based on level
-        if optimization_level == "DEFAULT":
+
+        # Base optimization
+        if optimization_level in ("DEFAULT", "FP16", "INT8", "FULL_INT8"):
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
-        
-        elif optimization_level == "FP16":
-            converter.optimizations = [tf.lite.Optimize.DEFAULT]
+
+        # FP16
+        if optimization_level == "FP16":
             converter.target_spec.supported_types = [tf.float16]
-        
-        elif optimization_level == "INT8":
-            converter.optimizations = [tf.lite.Optimize.DEFAULT]
-            # For INT8, we need a representative dataset
-            representative_dataset = self._create_representative_dataset(model)
-            converter.representative_dataset = representative_dataset
-        
-        elif optimization_level == "FULL_INT8":
-            converter.optimizations = [tf.lite.Optimize.DEFAULT]
-            representative_dataset = self._create_representative_dataset(model)
-            converter.representative_dataset = representative_dataset
+
+        # INT8 calibration (partial) - requires representative dataset matching model input
+        if optimization_level in ("INT8", "FULL_INT8"):
+            if representative_dataset_fn is None:
+                # create a small default representative dataset if not provided
+                representative_dataset_fn = self._create_default_representative_dataset(model)
+            converter.representative_dataset = representative_dataset_fn
+
+        # FULL_INT8: require full integer quantization - be conservative and set types only if representative provided
+        if optimization_level == "FULL_INT8":
             converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-            converter.inference_input_type = tf.uint8
-            converter.inference_output_type = tf.uint8
-        
-        # Arm-specific optimizations
-        converter.experimental_new_converter = True
-        converter._experimental_default_to_single_batch_in_tensor_list_ops = True
-        
-        # Convert model
+            # Do not force inference types blindly; inspect input dtype
+            input_dtype = model.inputs[0].dtype
+            # If the model was trained with uint8 input pipeline, you may set uint8; else use int8
+            converter.inference_input_type = tf.int8
+            converter.inference_output_type = tf.int8
+
+        # Avoid unstable private flags; rely on stable APIs
         try:
             tflite_model = converter.convert()
-            
-            # Save converted model
-            output_path = self.output_dir / f"{model_name}_{optimization_level.lower()}.tflite"
-            with open(output_path, 'wb') as f:
-                f.write(tflite_model)
-            
-            self.logger.info(f"✅ Model converted and saved: {output_path}")
-            
-            # Generate model info
-            model_info = self._generate_model_info(model, tflite_model, output_path)
-            self._save_model_info(model_name, optimization_level, model_info)
-            
-            return output_path, model_info
-            
         except Exception as e:
-            self.logger.error(f"❌ Conversion failed: {e}")
+            logger.error(f"Conversion failed for {model_name}: {e}")
             raise
-    
-    def _create_representative_dataset(self, model):
-        """Create representative dataset for quantization"""
-        input_shape = model.input_shape
-        
-        def representative_dataset():
+
+        output_path = self.output_dir / f"{model_name}_{optimization_level.lower()}.tflite"
+        with open(output_path, "wb") as f:
+            f.write(tflite_model)
+
+        model_info = self._generate_model_info(model, tflite_model, output_path)
+        self._save_model_info(model_name, optimization_level, model_info)
+        logger.info(f"Conversion succeeded: {output_path}")
+
+        return output_path, model_info
+
+    def _create_default_representative_dataset(self, model) -> Callable[[], Generator]:
+        """Create a conservative representative dataset that respects model.input_shape"""
+        input_shape = None
+        try:
+            input_shape = tuple(model.input_shape[1:])  # drop batch
+        except Exception:
+            # fallback to a typical image input size
+            input_shape = (96, 96, 3)
+
+        def _repr():
             for _ in range(100):
-                if len(input_shape) == 4:  # Image data
-                    data = np.random.randint(0, 255, size=(1,) + input_shape[1:]).astype(np.float32)
-                else:  # Feature data
-                    data = np.random.randn(1, *input_shape[1:]).astype(np.float32)
-                yield [data]
-        
-        return representative_dataset
-    
-    def _generate_model_info(self, original_model, tflite_model, output_path):
-        """Generate information about the converted model"""
-        # Get original model info
-        original_params = original_model.count_params()
-        original_size = os.path.getsize(self.model_dir / f"{original_model.name}.h5") if hasattr(original_model, 'name') else 0
-        
-        # Get TFLite model info
+                if len(input_shape) == 3:
+                    # image-like
+                    arr = np.random.randint(0, 255, size=(1,) + input_shape).astype(np.float32)
+                    # yield WITHOUT an extra batch dimension if the converter expects it - the converter expects list of arrays
+                    yield [arr]
+                else:
+                    arr = np.random.randn(1, *input_shape).astype(np.float32)
+                    yield [arr]
+
+        return _repr
+
+    def _generate_model_info(self, original_model, tflite_model, output_path: Path) -> dict:
         tflite_size = os.path.getsize(output_path)
-        
-        # Get model structure info
-        interpreter = tf.lite.Interpreter(model_content=tflite_model)
-        interpreter.allocate_tensors()
-        
-        input_details = interpreter.get_input_details()
-        output_details = interpreter.get_output_details()
-        
+        original_size = _safe_get_model_size(self.model_dir / f"{getattr(original_model, 'name', 'model')}.h5")
+        try:
+            interpreter = tf.lite.Interpreter(model_content=tflite_model)
+            interpreter.allocate_tensors()
+            input_details = interpreter.get_input_details()
+            output_details = interpreter.get_output_details()
+        except Exception as e:
+            logger.warning(f"Failed to inspect TFLite model details: {e}")
+            input_details = []
+            output_details = []
+
         model_info = {
-            'original_parameters': original_params,
-            'original_size_mb': original_size / (1024 * 1024),
-            'tflite_size_mb': tflite_size / (1024 * 1024),
-            'compression_ratio': original_size / tflite_size if original_size > 0 else 0,
-            'input_details': [
-                {
-                    'name': detail['name'],
-                    'shape': detail['shape'].tolist(),
-                    'dtype': str(detail['dtype'])
-                } for detail in input_details
+            "original_parameters": int(original_model.count_params()) if hasattr(original_model, "count_params") else 0,
+            "original_size_mb": original_size / (1024 * 1024),
+            "tflite_size_mb": tflite_size / (1024 * 1024),
+            "compression_ratio": (original_size / tflite_size) if (original_size and tflite_size) else 0,
+            "input_details": [
+                {"name": d.get("name"), "shape": tuple(d.get("shape", [])), "dtype": str(d.get("dtype"))}
+                for d in input_details
             ],
-            'output_details': [
-                {
-                    'name': detail['name'],
-                    'shape': detail['shape'].tolist(),
-                    'dtype': str(detail['dtype'])
-                } for detail in output_details
+            "output_details": [
+                {"name": d.get("name"), "shape": tuple(d.get("shape", [])), "dtype": str(d.get("dtype"))}
+                for d in output_details
             ],
-            'tensor_count': len(interpreter.get_tensor_details())
+            "tensor_count": len(interpreter.get_tensor_details()) if input_details else 0
         }
-        
         return model_info
-    
-    def _save_model_info(self, model_name, optimization_level, model_info):
-        """Save model information to JSON"""
+
+    def _save_model_info(self, model_name: str, optimization_level: str, model_info: dict):
         info_dir = self.output_dir / "model_info"
         info_dir.mkdir(exist_ok=True)
-        
         info_path = info_dir / f"{model_name}_{optimization_level.lower()}_info.json"
-        
-        with open(info_path, 'w') as f:
+        with open(info_path, "w") as f:
             json.dump(model_info, f, indent=2)
-        
-        self.logger.info(f"📊 Model info saved: {info_path}")
-    
+        logger.info(f"Model info saved: {info_path}")
+
     def batch_convert_models(self, model_configs: dict):
-        """
-        Batch convert multiple models with different optimizations
-        
-        Args:
-            model_configs: Dictionary with model names and their optimization levels
-                Example: {'face_analyzer': ['DEFAULT', 'INT8'], 'movement_analyzer': ['FP16']}
-        """
         results = {}
-        
         for model_name, optimizations in model_configs.items():
             results[model_name] = {}
-            
             for optimization in optimizations:
                 try:
-                    output_path, model_info = self.convert_keras_to_tflite(model_name, optimization)
-                    results[model_name][optimization] = {
-                        'output_path': str(output_path),
-                        'model_info': model_info,
-                        'success': True
-                    }
+                    out_path, info = self.convert_keras_to_tflite(model_name, optimization)
+                    results[model_name][optimization] = {"output_path": str(out_path), "model_info": info, "success": True}
                 except Exception as e:
-                    results[model_name][optimization] = {
-                        'success': False,
-                        'error': str(e)
-                    }
-        
-        # Save batch conversion summary
+                    results[model_name][optimization] = {"success": False, "error": str(e)}
         self._save_batch_summary(results)
         return results
-    
-    def _save_batch_summary(self, results):
-        """Save batch conversion summary"""
+
+    def _save_batch_summary(self, results: dict):
         summary = {
-            'conversion_date': str(np.datetime64('now')),
-            'total_models': len(results),
-            'total_conversions': sum(len(conversions) for conversions in results.values()),
-            'successful_conversions': sum(
-                1 for model_conversions in results.values()
-                for conversion in model_conversions.values()
-                if conversion.get('success', False)
-            ),
-            'models': results
+            "conversion_date": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "total_models": len(results),
+            "total_conversions": sum(len(v) for v in results.values()),
+            "successful_conversions": sum(1 for v in results.values() for c in v.values() if c.get("success")),
+            "models": results
         }
-        
         summary_path = self.output_dir / "conversion_summary.json"
-        with open(summary_path, 'w') as f:
+        with open(summary_path, "w") as f:
             json.dump(summary, f, indent=2)
-        
-        self.logger.info(f"📋 Batch conversion summary saved: {summary_path}")
-    
-    def benchmark_tflite_model(self, model_path: Path, input_shape: tuple, iterations: int = 100):
-        """Benchmark TFLite model performance"""
-        self.logger.info(f"⏱️ Benchmarking {model_path.name}...")
-        
-        # Load model
+        logger.info(f"Batch conversion summary saved: {summary_path}")
+
+    def benchmark_tflite_model(self, model_path: Path, input_shape: Tuple[int, ...], iterations: int = 100):
+        logger.info(f"Benchmarking {model_path.name} with input shape {input_shape}")
         interpreter = tf.lite.Interpreter(model_path=str(model_path))
         interpreter.allocate_tensors()
-        
         input_details = interpreter.get_input_details()
         output_details = interpreter.get_output_details()
-        
-        # Prepare input data based on expected type
-        if input_details[0]['dtype'] == np.uint8:
-            input_data = np.random.randint(0, 255, size=input_shape).astype(np.uint8)
-        else:
-            input_data = np.random.randn(*input_shape).astype(np.float32)
-        
-        # Warm-up
-        for _ in range(10):
-            interpreter.set_tensor(input_details[0]['index'], input_data)
-            interpreter.invoke()
-        
-        # Benchmark inference time
-        times = []
-        memory_usage = []
-        
-        for _ in range(iterations):
-            start_time = tf.timestamp()
-            
-            interpreter.set_tensor(input_details[0]['index'], input_data)
-            interpreter.invoke()
-            output_data = interpreter.get_tensor(output_details[0]['index'])
-            
-            end_time = tf.timestamp()
-            times.append((end_time - start_time) * 1000)  # Convert to ms
-            
-            # Simple memory usage estimation
-            memory_usage.append(self._estimate_memory_usage(interpreter))
-        
-        benchmark_results = {
-            'average_time_ms': float(np.mean(times)),
-            'std_time_ms': float(np.std(times)),
-            'min_time_ms': float(np.min(times)),
-            'max_time_ms': float(np.max(times)),
-            'throughput_fps': float(1000 / np.mean(times)),
-            'average_memory_mb': float(np.mean(memory_usage)),
-            'model_size_mb': os.path.getsize(model_path) / (1024 * 1024)
-        }
-        
-        self.logger.info(f"📊 Benchmark results for {model_path.name}:")
-        self.logger.info(f"   Average inference: {benchmark_results['average_time_ms']:.2f} ms")
-        self.logger.info(f"   Throughput: {benchmark_results['throughput_fps']:.2f} FPS")
-        self.logger.info(f"   Memory usage: {benchmark_results['average_memory_mb']:.2f} MB")
-        
-        return benchmark_results
-    
-    def _estimate_memory_usage(self, interpreter):
-        """Estimate memory usage of TFLite interpreter"""
-        tensor_details = interpreter.get_tensor_details()
-        total_memory = 0
-        
-        for tensor in tensor_details:
-            if tensor['shape'] is not None:
-                tensor_size = np.prod(tensor['shape']) * np.dtype(tensor['dtype']).itemsize
-                total_memory += tensor_size
-        
-        return total_memory / (1024 * 1024)  # Convert to MB
+        if not input_details:
+            raise RuntimeError("Model has no input details")
 
-class ArmOptimizedConverter(TFLiteConverter):
-    """Arm-optimized TFLite conversion with XNNPACK support"""
-    
-    def __init__(self, model_dir="models/trained_models"):
-        super().__init__(model_dir)
-        self.supported_arm_optimizations = ['XNNPACK', 'NEON', 'ARM_COMPUTE_LIBRARY']
-    
-    def convert_with_xnnpack(self, model_name: str, optimization_level: str = "INT8"):
-        """Convert model with XNNPACK delegate for Arm acceleration"""
-        self.logger.info(f"🚀 Converting {model_name} with XNNPACK optimization...")
-        
+        # Build input_data using input_details shape/dtype (use provided input_shape as fallback)
+        expected_shape = tuple(input_details[0]["shape"])
+        dtype = np.dtype(input_details[0]["dtype"].name) if hasattr(input_details[0]["dtype"], "name") else np.float32
+        # If shape has -1 or 0, fallback to provided input_shape
+        if any(int(x) <= 0 for x in expected_shape):
+            expected_shape = input_shape
+
+        if np.issubdtype(dtype, np.integer):
+            # uint8/int8 handling - use 0-255 uniform
+            input_data = np.random.randint(0, 255, size=expected_shape).astype(dtype)
+        else:
+            input_data = np.random.randn(*expected_shape).astype(dtype)
+
+        # Warm-up
+        for _ in range(5):
+            interpreter.set_tensor(input_details[0]["index"], input_data)
+            interpreter.invoke()
+
+        times_ms = []
+        for _ in range(iterations):
+            t0 = time.perf_counter()
+            interpreter.set_tensor(input_details[0]["index"], input_data)
+            interpreter.invoke()
+            t1 = time.perf_counter()
+            times_ms.append((t1 - t0) * 1000.0)
+
+        times_ms = np.array(times_ms)
+        result = {
+            "average_time_ms": float(np.mean(times_ms)),
+            "std_time_ms": float(np.std(times_ms)),
+            "min_time_ms": float(np.min(times_ms)),
+            "max_time_ms": float(np.max(times_ms)),
+            "throughput_fps": float(1000.0 / float(np.mean(times_ms))),
+            "model_size_mb": os.path.getsize(model_path) / (1024 * 1024)
+        }
+        logger.info(f"Benchmark: {result}")
+        return result
+
+    def verify_xnnpack(self, model_path: Path) -> bool:
+        """Try loading XNNPACK delegate to check compatibility — non-fatal if it fails."""
         try:
-            # First convert to TFLite
-            tflite_path, model_info = self.convert_keras_to_tflite(model_name, optimization_level)
-            
-            # Apply XNNPACK delegate (this happens at runtime, but we can verify compatibility)
-            self._verify_xnnpack_compatibility(tflite_path)
-            
-            self.logger.info(f"✅ XNNPACK-compatible model created: {tflite_path}")
-            return tflite_path, model_info
-            
-        except Exception as e:
-            self.logger.error(f"❌ XNNPACK conversion failed: {e}")
-            raise
-    
-    def _verify_xnnpack_compatibility(self, model_path):
-        """Verify that model is compatible with XNNPACK delegate"""
-        try:
-            # Load model with XNNPACK delegate
-            delegate = tf.lite.load_delegate('XNNPACK')
-            interpreter = tf.lite.Interpreter(
-                model_path=str(model_path),
-                experimental_delegates=[delegate]
-            )
+            delegate = tf.lite.load_delegate("XNNPACK")
+            interpreter = tf.lite.Interpreter(model_path=str(model_path), experimental_delegates=[delegate])
             interpreter.allocate_tensors()
-            
-            self.logger.info("✅ Model is XNNPACK compatible")
+            logger.info("XNNPACK delegate loaded successfully")
             return True
-            
         except Exception as e:
-            self.logger.warning(f"⚠️ Model may not be fully XNNPACK compatible: {e}")
+            logger.warning(f"XNNPACK delegate not available or model incompatible: {e}")
             return False
-    
-    def create_multi_delegate_model(self, model_name: str, delegates: list):
-        """Create model optimized for multiple delegates"""
-        self.logger.info(f"🔄 Creating multi-delegate model for {model_name}...")
-        
-        # This is a simplified implementation
-        # In practice, you'd partition the model for different delegates
-        
-        model_path = self.model_dir / f"{model_name}.h5"
-        model = tf.keras.models.load_model(model_path)
-        
-        converter = tf.lite.TFLiteConverter.from_keras_model(model)
-        converter.optimizations = [tf.lite.Optimize.DEFAULT]
-        converter.experimental_new_converter = True
-        
-        # Note: Multi-delegate support requires model partitioning
-        # This is an advanced feature that would need custom implementation
-        
-        tflite_model = converter.convert()
-        
-        output_path = self.output_dir / f"{model_name}_multi_delegate.tflite"
-        with open(output_path, 'wb') as f:
-            f.write(tflite_model)
-        
-        self.logger.info(f"✅ Multi-delegate model created: {output_path}")
-        return output_path
+
 
 def main():
-    """Main conversion script"""
-    converter = ArmOptimizedConverter()
-    
-    # Model configurations for batch conversion
+    converter = TFLiteConverter()
     model_configs = {
-        'face_analyzer': ['DEFAULT', 'INT8', 'FP16'],
-        'movement_analyzer': ['DEFAULT', 'INT8'],
-        'fusion_engine': ['DEFAULT', 'INT8']
+        "face_analyzer": ["DEFAULT", "INT8", "FP16"],
+        "movement_analyzer": ["DEFAULT", "INT8"],
+        "fusion_engine": ["DEFAULT", "INT8"]
     }
-    
-    print("🚀 Starting batch model conversion...")
-    
-    try:
-        # Batch convert all models
-        results = converter.batch_convert_models(model_configs)
-        
-        # Benchmark converted models
-        print("\n⏱️ Starting model benchmarking...")
-        benchmark_results = {}
-        
-        for model_name, conversions in results.items():
-            benchmark_results[model_name] = {}
-            
-            for optimization, result in conversions.items():
-                if result.get('success', False):
-                    model_path = Path(result['output_path'])
-                    
-                    # Determine input shape based on model type
-                    if 'face' in model_name.lower():
+    logger.info("Starting batch conversion")
+    results = converter.batch_convert_models(model_configs)
+
+    # Benchmark successful conversions (minimal example)
+    benchmarks = {}
+    for model_name, conversions in results.items():
+        benchmarks[model_name] = {}
+        for opt, meta in conversions.items():
+            if meta.get("success"):
+                try:
+                    path = Path(meta["output_path"])
+                    # choose fallback input shapes by model role
+                    if "face" in model_name.lower():
                         input_shape = (1, 96, 96, 3)
-                    elif 'movement' in model_name.lower():
+                    elif "movement" in model_name.lower():
                         input_shape = (1, 50, 12)
-                    else:  # fusion engine
+                    else:
                         input_shape = (1, 64)
-                    
-                    benchmark = converter.benchmark_tflite_model(model_path, input_shape)
-                    benchmark_results[model_name][optimization] = benchmark
-        
-        # Save benchmark results
-        benchmark_path = converter.output_dir / "benchmark_results.json"
-        with open(benchmark_path, 'w') as f:
-            json.dump(benchmark_results, f, indent=2)
-        
-        print(f"📊 Benchmark results saved: {benchmark_path}")
-        print("🎉 Model conversion and benchmarking complete!")
-        
-    except Exception as e:
-        print(f"❌ Conversion process failed: {e}")
+                    benchmarks[model_name][opt] = converter.benchmark_tflite_model(path, input_shape)
+                except Exception as e:
+                    logger.warning(f"Benchmark failed for {model_name} {opt}: {e}")
+
+    with open(converter.output_dir / "benchmark_results.json", "w") as fh:
+        json.dump(benchmarks, fh, indent=2)
+
+    logger.info("Conversion + benchmarking finished")
+
 
 if __name__ == "__main__":
     main()
