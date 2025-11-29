@@ -1,4 +1,3 @@
-# data_preprocess.py
 import kagglehub
 import os
 import numpy as np
@@ -95,8 +94,8 @@ def download_and_preprocess_fer2013():
         
         # Verify
         if x_path.exists() and y_path.exists():
-            file_size_x = x_path.stat().st_size / (1024 * 1024)  # MB
-            file_size_y = y_path.stat().st_size / (1024 * 1024)  # MB
+            file_size_x = x_path.stat().st_size / (1024 * 1024)  
+            file_size_y = y_path.stat().st_size / (1024 * 1024)  
             print(f"✅ Files saved successfully!")
             print(f"   fer_X.npy: {file_size_x:.1f} MB")
             print(f"   fer_y.npy: {file_size_y:.1f} MB")
