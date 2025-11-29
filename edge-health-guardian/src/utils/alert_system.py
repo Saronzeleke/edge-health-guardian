@@ -1,4 +1,3 @@
-# src/utils/alert_system.py
 import pygame
 import threading
 import time
@@ -14,7 +13,7 @@ class AlertSystem:
         self.alert_history = []
         self.audio_enabled = True
         self.visual_enabled = True
-        self.haptic_enabled = False  # For mobile devices
+        self.haptic_enabled = False  
         
         # Initialize pygame for audio
         try:
@@ -86,19 +85,19 @@ class AlertSystem:
                 
             if alert_type == 'critical':
                 # Triple beep for critical alerts
-                self._generate_beep_sound(880, 400)  # High A
+                self._generate_beep_sound(880, 400)  
                 time.sleep(0.15)
                 self._generate_beep_sound(880, 400)
                 time.sleep(0.15)
                 self._generate_beep_sound(880, 400)
             elif alert_type == 'warning':
                 # Double beep for warnings
-                self._generate_beep_sound(660, 300)  # Middle E
+                self._generate_beep_sound(660, 300)  
                 time.sleep(0.2)
                 self._generate_beep_sound(660, 300)
             else:
                 # Single beep for info
-                self._generate_beep_sound(440, 200)  # Low A
+                self._generate_beep_sound(440, 200)  
                 
         except Exception as e:
             logging.error(f"Audio alert failed: {e}")
@@ -112,13 +111,13 @@ class AlertSystem:
             
             # Generate sine wave
             buf = np.zeros((n_samples, 2), dtype=np.int16)
-            max_amplitude = 32767  # Max for 16-bit audio
+            max_amplitude = 32767  
             
             for i in range(n_samples):
-                t = float(i) / sample_rate  # time in seconds
+                t = float(i) / sample_rate 
                 # Sine wave for the given frequency
                 sample = max_amplitude * 0.5 * np.sin(2 * np.pi * frequency * t)
-                buf[i][0] = int(sample)  # left channel
+                buf[i][0] = int(sample)  
                 buf[i][1] = int(sample)  # right channel
             
             # Create pygame sound and play
