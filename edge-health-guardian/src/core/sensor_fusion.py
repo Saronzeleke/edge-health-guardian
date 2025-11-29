@@ -1,4 +1,3 @@
-# src/core/sensor_fusion.py
 import numpy as np
 import threading
 from collections import deque
@@ -107,7 +106,7 @@ class AdaptiveSensorFusion:
                             elif isinstance(item, (int, float)):
                                 values.append([item])
                             elif isinstance(item, np.ndarray):
-                                values.append(item.flatten()[:1])  # Take first element
+                                values.append(item.flatten()[:1])  
                         
                         if not values:
                             return None
@@ -142,8 +141,7 @@ class AdaptiveSensorFusion:
         try:
             total = self.face_confidence + self.movement_confidence + max(0.1, self.hr_confidence)
             if total == 0:
-                return (0.33, 0.33, 0.34)  # Equal weights if all zero
-                
+                return (0.33, 0.33, 0.34)  
             return (
                 self.face_confidence / total,
                 self.movement_confidence / total,
@@ -151,7 +149,7 @@ class AdaptiveSensorFusion:
             )
         except Exception as e:
             logger.error(f"Fusion weights calculation failed: {e}")
-            return (0.33, 0.33, 0.34)  # Fallback to equal weights
+            return (0.33, 0.33, 0.34)  
 
     def get_system_status(self) -> Dict:
         """Get current system status for debugging"""
