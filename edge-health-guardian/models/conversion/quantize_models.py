@@ -4,223 +4,172 @@ import tensorflow_model_optimization as tfmot
 import numpy as np
 import os
 from pathlib import Path
+import logging
+import json
+import time
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("ModelQuantizer")
+
 
 class ModelQuantizer:
-    def __init__(self, model_dir="models/trained_models"):
+    def __init__(self, model_dir: str = "models/trained_models"):
         self.model_dir = Path(model_dir)
         self.output_dir = Path("models/optimized_models")
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
-    def create_representative_dataset(self, input_shape, num_samples=100):
-        """Create representative dataset for quantization calibration"""
-        def _representative_dataset():
+
+    def create_representative_dataset(self, input_shape: tuple, num_samples: int = 100):
+        """
+        Returns a function that yields representative inputs for quantization.
+        input_shape should be shape WITHOUT batch dimension: e.g. (96,96,3) or (50,12)
+        """
+        def _representative():
             for _ in range(num_samples):
-                if len(input_shape) == 4:  # Image data
-                    data = np.random.randint(0, 255, size=(1,) + input_shape).astype(np.float32)
-                else:  # Feature data
-                    data = np.random.randn(1, *input_shape).astype(np.float32)
-                yield [data]
-        return _representative_dataset
-    
+                if len(input_shape) == 3:
+                    arr = np.random.randint(0, 255, size=(1, *input_shape)).astype(np.float32)
+                else:
+                    arr = np.random.randn(1, *input_shape).astype(np.float32)
+                yield [arr]
+        return _representative
+
     def quantize_face_model(self):
-        """Quantize face analysis model to INT8"""
-        print("🔧 Quantizing face analysis model...")
-        
-        # Load trained model
         model_path = self.model_dir / "face_analyzer.h5"
         if not model_path.exists():
-            raise FileNotFoundError(f"Face model not found: {model_path}")
-        
-        # Load and prepare for quantization
-        model = tf.keras.models.load_model(model_path)
-        
-        # Apply quantization aware training
-        quantize_model = tfmot.quantization.keras.quantize_model
-        q_aware_model = quantize_model(model)
-        
-        # Recompile quantized model
-        q_aware_model.compile(
-            optimizer='adam',
-            loss='binary_crossentropy',
-            metrics=['accuracy']
-        )
-        
-        # Convert to TFLite with INT8 quantization
-        converter = tf.lite.TFLiteConverter.from_keras_model(q_aware_model)
+            raise FileNotFoundError(f"{model_path} not found")
+
+        model = tf.keras.models.load_model(str(model_path))
+        # Use post-training quantization (or QAT if you have that)
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
-        
-        # Set representative dataset for full INT8 quantization
-        representative_dataset = self.create_representative_dataset((96, 96, 3))
-        converter.representative_dataset = representative_dataset
-        
-        # Ensure full INT8 quantization
-        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-        converter.inference_input_type = tf.uint8
-        converter.inference_output_type = tf.uint8
-        
-        # Enable XNNPACK
-        converter.experimental_new_converter = True
-        
-        # Convert model
-        tflite_model = converter.convert()
-        
-        # Save quantized model
-        output_path = self.output_dir / "face_analyzer_int8.tflite"
-        with open(output_path, 'wb') as f:
-            f.write(tflite_model)
-        
-        print(f"✅ Face model quantized and saved: {output_path}")
-        return output_path
-    
+
+        rep_fn = self.create_representative_dataset((96, 96, 3), num_samples=200)
+        converter.representative_dataset = rep_fn
+        # For stability, keep inference types as float unless you are sure your runtime expects uint8/int8
+        # Do NOT force uint8 unless your input pipeline uses uint8
+        # If you truly need full-int8:
+        # converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+        # converter.inference_input_type = tf.int8
+        # converter.inference_output_type = tf.int8
+
+        try:
+            tflite_model = converter.convert()
+        except Exception as e:
+            logger.error(f"Face model quantization failed: {e}")
+            raise
+
+        out = self.output_dir / "face_analyzer_quant.tflite"
+        with open(out, "wb") as fh:
+            fh.write(tflite_model)
+        logger.info(f"Quantized face model saved: {out}")
+        return out
+
     def quantize_movement_model(self):
-        """Quantize movement analysis model to INT8"""
-        print("🔧 Quantizing movement analysis model...")
-        
         model_path = self.model_dir / "movement_analyzer.h5"
         if not model_path.exists():
-            raise FileNotFoundError(f"Movement model not found: {model_path}")
-        
-        model = tf.keras.models.load_model(model_path)
-        
-        # Convert to TFLite with optimization
+            raise FileNotFoundError(f"{model_path} not found")
+
+        model = tf.keras.models.load_model(str(model_path))
         converter = tf.lite.TFLiteConverter.from_keras_model(model)
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
-        
-        # Representative dataset for movement features
-        representative_dataset = self.create_representative_dataset((50, 12))  # 50 timesteps, 12 features
-        converter.representative_dataset = representative_dataset
-        
-        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-        converter.inference_input_type = tf.int8
-        converter.inference_output_type = tf.int8
-        
-        tflite_model = converter.convert()
-        
-        output_path = self.output_dir / "movement_analyzer_int8.tflite"
-        with open(output_path, 'wb') as f:
-            f.write(tflite_model)
-        
-        print(f"✅ Movement model quantized and saved: {output_path}")
-        return output_path
-    
+
+        rep_fn = self.create_representative_dataset((50, 12), num_samples=200)
+        converter.representative_dataset = rep_fn
+
+        try:
+            tflite_model = converter.convert()
+        except Exception as e:
+            logger.error(f"Movement model quantization failed: {e}")
+            raise
+
+        out = self.output_dir / "movement_analyzer_quant.tflite"
+        with open(out, "wb") as fh:
+            fh.write(tflite_model)
+        logger.info(f"Quantized movement model saved: {out}")
+        return out
+
     def quantize_fusion_model(self):
-        """Quantize sensor fusion model to INT8"""
-        print("🔧 Quantizing sensor fusion model...")
-        
         model_path = self.model_dir / "fusion_engine.h5"
         if not model_path.exists():
-            raise FileNotFoundError(f"Fusion model not found: {model_path}")
-        
-        model = tf.keras.models.load_model(model_path)
-        
+            raise FileNotFoundError(f"{model_path} not found")
+
+        model = tf.keras.models.load_model(str(model_path))
         converter = tf.lite.TFLiteConverter.from_keras_model(model)
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
-        
-        representative_dataset = self.create_representative_dataset((1, 64))  # Fused features
-        converter.representative_dataset = representative_dataset
-        
-        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-        converter.inference_input_type = tf.int8
-        converter.inference_output_type = tf.int8
-        
-        tflite_model = converter.convert()
-        
-        output_path = self.output_dir / "fusion_engine_int8.tflite"
-        with open(output_path, 'wb') as f:
-            f.write(tflite_model)
-        
-        print(f"✅ Fusion model quantized and saved: {output_path}")
-        return output_path
-    
-    def convert_to_fp16(self, model_path):
-        """Convert model to FP16 for GPU acceleration"""
-        print(f"🔧 Converting {model_path} to FP16...")
-        
-        model = tf.keras.models.load_model(model_path)
-        
-        converter = tf.lite.TFLiteConverter.from_keras_model(model)
-        converter.optimizations = [tf.lite.Optimize.DEFAULT]
-        converter.target_spec.supported_types = [tf.float16]
-        
-        tflite_model = converter.convert()
-        
-        output_path = self.output_dir / f"{model_path.stem}_fp16.tflite"
-        with open(output_path, 'wb') as f:
-            f.write(tflite_model)
-        
-        print(f"✅ FP16 model saved: {output_path}")
-        return output_path
-    
+
+        # fusion likely expects shape (64,) -> pass (64,)
+        rep_fn = self.create_representative_dataset((64,), num_samples=200)
+        converter.representative_dataset = rep_fn
+
+        try:
+            tflite_model = converter.convert()
+        except Exception as e:
+            logger.error(f"Fusion model quantization failed: {e}")
+            raise
+
+        out = self.output_dir / "fusion_engine_quant.tflite"
+        with open(out, "wb") as fh:
+            fh.write(tflite_model)
+        logger.info(f"Quantized fusion model saved: {out}")
+        return out
+
     def benchmark_quantized_models(self):
-        """Benchmark quantized models for performance comparison"""
-        print("📊 Benchmarking quantized models...")
-        
-        benchmarks = {}
-        
-        for model_file in self.output_dir.glob("*.tflite"):
-            print(f"⏱️  Benchmarking {model_file.name}...")
-            
-            # Load model and create interpreter
-            interpreter = tf.lite.Interpreter(model_path=str(model_file))
-            interpreter.allocate_tensors()
-            
-            # Get input details
-            input_details = interpreter.get_input_details()
-            input_shape = input_details[0]['shape']
-            
-            # Prepare input data
-            if input_details[0]['dtype'] == np.uint8:
-                input_data = np.random.randint(0, 255, size=input_shape).astype(np.uint8)
-            else:
-                input_data = np.random.randn(*input_shape).astype(np.float32)
-            
-            # Benchmark inference time
-            import time
-            times = []
-            for _ in range(100):
-                start_time = time.perf_counter()
-                
-                interpreter.set_tensor(input_details[0]['index'], input_data)
-                interpreter.invoke()
-                
-                inference_time = time.perf_counter() - start_time
-                times.append(inference_time * 1000)  # Convert to ms
-            
-            avg_time = np.mean(times[10:])  # Skip first 10 for warmup
-            std_time = np.std(times[10:])
-            
-            benchmarks[model_file.name] = {
-                'average_time_ms': avg_time,
-                'std_time_ms': std_time,
-                'model_size_mb': model_file.stat().st_size / (1024 * 1024)
-            }
-            
-            print(f"   ⏱️  Average inference: {avg_time:.2f} ± {std_time:.2f} ms")
-            print(f"   📦 Model size: {benchmarks[model_file.name]['model_size_mb']:.2f} MB")
-        
-        return benchmarks
+        logger.info("Benchmarking quantized models in output folder")
+        results = {}
+        for f in self.output_dir.glob("*.tflite"):
+            try:
+                interpreter = tf.lite.Interpreter(model_path=str(f))
+                interpreter.allocate_tensors()
+                input_details = interpreter.get_input_details()
+                if not input_details:
+                    logger.warning(f"No input details for {f.name}; skipping")
+                    continue
+                shape = tuple(input_details[0]["shape"])
+                if any(int(x) <= 0 for x in shape):
+                    # fallback to sensible shape
+                    shape = input_details[0].get("shape_signature", shape)
+
+                dtype = np.dtype(input_details[0]["dtype"].name) if hasattr(input_details[0]["dtype"], "name") else np.float32
+                if np.issubdtype(dtype, np.integer):
+                    input_data = np.random.randint(0, 255, size=shape).astype(dtype)
+                else:
+                    input_data = np.random.randn(*shape).astype(dtype)
+
+                # warmup and timing
+                times = []
+                for i in range(30):
+                    t0 = time.perf_counter()
+                    interpreter.set_tensor(input_details[0]["index"], input_data)
+                    interpreter.invoke()
+                    t1 = time.perf_counter()
+                    if i >= 5:  # skip first 5 as warmup
+                        times.append((t1 - t0) * 1000.0)
+
+                arr = np.array(times)
+                results[f.name] = {
+                    "avg_ms": float(arr.mean()),
+                    "std_ms": float(arr.std()),
+                    "model_size_mb": float(f.stat().st_size) / (1024 * 1024)
+                }
+                logger.info(f"Benchmarked {f.name}: avg {results[f.name]['avg_ms']:.2f} ms")
+            except Exception as e:
+                logger.warning(f"Benchmark failed for {f.name}: {e}")
+        out_path = self.output_dir / "quant_benchmarks.json"
+        with open(out_path, "w") as fh:
+            json.dump(results, fh, indent=2)
+        return results
+
 
 def main():
-    quantizer = ModelQuantizer()
-    
+    q = ModelQuantizer()
     try:
-        # Quantize all models
-        face_model = quantizer.quantize_face_model()
-        movement_model = quantizer.quantize_movement_model()
-        fusion_model = quantizer.quantize_fusion_model()
-        
-        # Benchmark models
-        benchmarks = quantizer.benchmark_quantized_models()
-        
-        print("\n🎯 Quantization Complete!")
-        print("=" * 50)
-        for model_name, stats in benchmarks.items():
-            print(f"{model_name}:")
-            print(f"  └── Inference: {stats['average_time_ms']:.2f} ms")
-            print(f"  └── Size: {stats['model_size_mb']:.2f} MB")
-        
+        q.quantize_face_model()
+        q.quantize_movement_model()
+        q.quantize_fusion_model()
+        q.benchmark_quantized_models()
+        logger.info("Quantization + benchmarking complete")
     except Exception as e:
-        print(f"❌ Quantization failed: {e}")
+        logger.error(f"Quantization failed: {e}")
+
 
 if __name__ == "__main__":
     main()
