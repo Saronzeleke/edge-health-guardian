@@ -1,4 +1,3 @@
-# main.py
 import argparse
 import time
 import json 
@@ -150,7 +149,7 @@ class EdgeHealthGuardian:
             face_detected = expression_features.get('face_detected', 0)
             success = expression_features.get('success', 0)
             
-            if self.callback_count % 30 == 1:  # Log every 30th frame
+            if self.callback_count % 30 == 1:  
                 logging.info(f"Frame #{self.callback_count}: Face detected: {face_detected}, Success: {success}")
             
             # Convert tensor back to frame for display if needed
@@ -464,7 +463,7 @@ def main():
     health_guardian = EdgeHealthGuardian(args.config)
     
     print("🚀 Starting Edge Health Guardian...")
-    print("📍 Privacy-First | 🔒 On-Device AI | 🏥 Health Monitoring")
+    print(" Privacy-First |  On-Device AI |  Health Monitoring")
     print("Press Ctrl+C to stop monitoring\n")
     
     try:
