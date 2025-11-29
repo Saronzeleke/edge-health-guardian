@@ -1,4 +1,3 @@
-# src/sensors/camera_processor.py
 import cv2
 import numpy as np
 import threading
@@ -140,8 +139,7 @@ class CameraProcessor:
         self.frame_count = 0
         self.last_frame_time = time.time()
         self.fps = 0
-        self.model_input_size = (96, 96)  # Match your face analyzer model input
-
+        self.model_input_size = (96, 96)  
     def start_capture(self, callback: Callable):
         """Start camera capture with robust initialization"""
         try:
@@ -204,7 +202,7 @@ class CameraProcessor:
                         logger.error("Max consecutive frame read errors reached")
                         break
                     
-                    time.sleep(0.1)  # Brief pause before retry
+                    time.sleep(0.1)  
                     continue
                 
                 # Reset error counter on successful frame read
@@ -218,8 +216,8 @@ class CameraProcessor:
                 
                 # Prepare callback data as a SINGLE dictionary
                 callback_data = {
-                    'frame_tensor': self._frame_to_tensor(frame),  # 4D tensor for models (96x96)
-                    'features': features,                          # Extracted features dict
+                    'frame_tensor': self._frame_to_tensor(frame),  
+                    'features': features,                       
                     'metadata': {
                         'frame_count': self.frame_count,
                         'timestamp': time.time(),
