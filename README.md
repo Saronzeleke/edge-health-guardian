@@ -149,6 +149,7 @@ export TF_ENABLE_ONEDNN_OPTS=1
 
 python edge-health-guardian/main.py --arm-optimized
 
+**Deployment scripts are generated on host machine; final execution occurs on Android (Termux) or Raspberry Pi.**
 
 # 🎯 Model Training Pipeline
 
