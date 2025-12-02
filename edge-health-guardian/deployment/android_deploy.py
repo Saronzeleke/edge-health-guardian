@@ -1,5 +1,4 @@
 # deployment/android_deploy.py
-import subprocess
 import os
 import sys
 from pathlib import Path
@@ -27,10 +26,6 @@ class AndroidDeployer:
     def build_android_app(self):
         """Build Android APK using Termux or Android Studio"""
         print("🔨 Building Android APK...")
-        
-        # This would use Android SDK in real implementation
-        # For demo, we'll create a Termux-compatible Python package
-        
         termux_script = self.create_termux_package()
         return termux_script
     
@@ -71,7 +66,8 @@ echo "✅ Installation complete!"
 echo "🚀 Run with: python ~/edge-health-guardian/android_main.py"
 '''
         
-        with open(termux_script, 'w') as f:
+        # FIXED: Explicit UTF-8 encoding to support emojis on Windows
+        with open(termux_script, 'w', encoding='utf-8') as f:
             f.write(script_content)
         
         termux_script.chmod(0o755)
@@ -203,7 +199,8 @@ if __name__ == "__main__":
         app.stop_monitoring()
 '''
         
-        with open(android_main, 'w') as f:
+        # FIXED: Explicit UTF-8 encoding to support emojis on Windows
+        with open(android_main, 'w', encoding='utf-8') as f:
             f.write(android_code)
         
         return android_main
